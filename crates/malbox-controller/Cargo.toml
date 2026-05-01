@@ -15,3 +15,6 @@ virt = "0.4"
 anyhow = "1.0"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+tracing-appender = "0.2"
