@@ -1,0 +1,13 @@
+[libvirt]
+uri = "qemu:///system"
+[paths]
+# Path to the gold master qcow2 image (read-only)
+master_image = "/var/lib/malbox/master.qcow2"
+# Directory for qcow2 overlays (per-job clones)
+overlay_dir = "/var/lib/malbox/overlays"
+# Directory for analysis reports
+report_dir = "/var/lib/malbox/reports"
+[vm]
+# VM hardware (can be overridden per-job)
+vcpus = 2
+memory_mb = 4096

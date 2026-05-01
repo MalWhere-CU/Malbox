@@ -1,0 +1,17 @@
+[package]
+name = "malbox-controller"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "malbox"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+virt = "0.4"
+anyhow = "1.0"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

@@ -1,6 +1,15 @@
-[package]
+[workspace]
+resolver = "3"
+members = [
+  "crates/malbox-proto",
+  "crates/malbox-controller",
+  "crates/malbox-agent",
+]
+
+
+[workspace.package]
 name = "Malbox"
 version = "0.1.0"
 edition = "2024"
-
-[dependencies]
+authors = ["MalWhere-CU"]
+license = "MIT"
