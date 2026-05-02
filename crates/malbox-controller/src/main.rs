@@ -18,5 +18,6 @@ fn main() {
         "Connected successfully to libvirt at {}",
         vm_mgr.conn.get_uri().unwrap()
     );
-    vm_mgr.create_overlay("job-test_123").unwrap();
+    let jd = vm_mgr.create_job_domain().unwrap();
+    println!("Started VM: {}", jd.vm_name);
 }
