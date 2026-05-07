@@ -6,6 +6,7 @@ use vm::VmManager;
 
 mod config;
 mod vm;
+
 fn main() {
     let path = Path::new("config.EXAMPLE.toml");
     let conf = Config::from_file(path)
@@ -20,4 +21,20 @@ fn main() {
     );
     let jd = vm_mgr.create_job_domain().unwrap();
     println!("Started VM: {}", jd.vm_name);
+    loop {
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .expect("Expected a line");
+        match input.trim() {
+            "destroy" => {
+                jd.teardown();
+                break;
+            }
+            "state" => {
+                println!("{:?}", jd.get_state());
+            }
+            _ => {}
+        }
+    }
 }

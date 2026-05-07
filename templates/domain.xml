@@ -1,0 +1,116 @@
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+  <name>{{NAME}}</name>
+  <uuid>{{UUID}}</uuid>
+  <memory unit='MiB'>4096</memory>
+  <currentMemory unit='MiB'>4096</currentMemory>
+  <vcpu placement='static'>2</vcpu>
+  
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader>
+    <nvram>{{NVRAM_PATH}}</nvram>
+    <smbios mode='sysinfo'/>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+    <kvm>
+      <hidden state='on'/>
+    </kvm>
+    <hyperv mode='custom'>
+      <relaxed state='on'/>
+      <vapic state='on'/>
+      <spinlocks state='on' retries='8191'/>
+      <vendor_id state='on' value='1791hb7853xp'/>
+    </hyperv>
+    <smm state='on'/>
+    <vmport state='off'/>
+  </features>
+
+  <cpu mode='host-passthrough' check='none' migratable='on'>
+    <topology sockets='1' dies='1' cores='2' threads='1'/>
+    <feature policy='disable' name='hypervisor'/>
+  </cpu>
+
+  <clock offset='localtime'>
+    <timer name='hypervclock' present='yes'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+
+  <sysinfo type='smbios'>
+    <system>
+      <entry name='manufacturer' value='Dell Inc.'/>
+      <entry name='product' value='Precision 5560'/>
+      <entry name='serial' value='{{VM_SERIAL}}'/>
+      <entry name='uuid' value='{{UUID}}'/>
+    </system>
+    <baseBoard>
+      <entry name='manufacturer' value='Dell Inc.'/>
+      <entry name='product' value='09T8R5'/>
+      <entry name='serial' value='{{BOARD_SERIAL}}'/>
+    </baseBoard>
+    <chassis>
+      <entry name='manufacturer' value='Dell Inc.'/>
+      <entry name='serial' value='{{CHASSIS_SERIAL}}'/>
+    </chassis>
+    <bios>
+      <entry name='vendor' value='Dell Inc.'/>
+      <entry name='version' value='1.15.0'/>
+      <entry name='date' value='01/15/2024'/>
+    </bios>
+  </sysinfo>
+
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{OVERLAY_PATH}}'/>
+      <target dev='sda' bus='sata'/>
+      <serial>{{DISK_SERIAL}}</serial>
+      <!-- <wwn>{{DISK_WWN}}</wwn> -->
+      <boot order='1'/>
+    </disk>
+
+    <interface type='network'>
+      <mac address='{{MAC_ADDRESS}}'/>
+      <source network='default'/>
+      <model type='e1000e'/>
+    </interface>
+
+    <input type='tablet' bus='usb'/>
+    <input type='keyboard' bus='virtio'/>
+
+    <graphics type='spice' autoport='yes' listen='127.0.0.1' defaultMode='insecure'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+
+    <video>
+      <model type='virtio' heads='1' primary='yes'/>
+    </video>
+
+    <channel type='spicevmc'>
+      <target type='virtio' name='com.redhat.spice.0' state='connected'/>
+    </channel>
+
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+
+    <tpm model='tpm-tis'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+
+    <memballoon model='none'/>
+  </devices>
+</domain>

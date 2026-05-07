@@ -1,0 +1,50 @@
+<domain type='kvm'>
+  <name>{{NAME}}</name>
+  <uuid>{{UUID}}</uuid>
+  <memory unit='MiB'>4096</memory>
+  <currentMemory unit='MiB'>4096</currentMemory>
+  <vcpu placement='static'>2</vcpu>
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <!-- <loader readonly='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader> -->
+    <!-- <nvram template='/usr/share/OVMF/OVMF_VARS_4M.fd'>/var/lib/libvirt/qemu/nvram/{{NAME}}_VARS.fd</nvram> -->
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <kvm>
+      <hidden state='on'/>
+    </kvm>
+  </features>
+  <cpu mode='host-passthrough' check='none'/>
+  <clock offset='localtime'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{OVERLAY_PATH}}'/>
+      <target dev='sda' bus='sata'/>
+    </disk>
+    <interface type='network'>
+      <mac address="{{MAC_ADDRESS}}" />
+      <source network='default'/>
+      <model type='e1000e'/>
+    </interface>
+    <input type='mouse' bus='ps2'/>
+    <input type='keyboard' bus='ps2'/>
+    <graphics type='spice' autoport='yes'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+    <memballoon model='none'/>
+    <video>
+      <model type='vga' vram='16384' heads='1'/>
+    </video>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+  </devices>
+</domain>

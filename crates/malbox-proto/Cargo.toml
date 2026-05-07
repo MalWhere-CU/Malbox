@@ -1,0 +1,15 @@
+[package]
+name = "malbox-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+prost = "0.14"
+bytes = "1.9"
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+
+[build-dependencies]
+tonic-prost-build = "0.14.6"

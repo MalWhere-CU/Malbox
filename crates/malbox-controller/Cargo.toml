@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 virt = "0.4"
+virt-sys = "0.3.1"
 anyhow = "1.0"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -19,3 +20,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 tracing-appender = "0.2"
 uuid = { version = "1.23.1", features = ["v4"]}
+rand = "0.8"
+libc = "0.2"

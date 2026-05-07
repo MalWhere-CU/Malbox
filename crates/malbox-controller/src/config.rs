@@ -13,9 +13,11 @@ pub struct VmConfig {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PathsConfig {
+    pub master_nvram: PathBuf,
     pub master_image: PathBuf,
     pub overlay_dir: PathBuf,
     pub report_dir: PathBuf,
+    pub nvram_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

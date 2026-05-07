@@ -1,3 +1,11 @@
+[profile.dev]
+opt-level = 0         # Disable optimizations (stops inlining)
+debug = 2             # Full debug info (line tables, symbols, etc.)
+
+[profile.dev.package."*"]
+opt-level = 0         # Apply "no optimizations" to all external crates
+
+
 [workspace]
 resolver = "3"
 members = [
