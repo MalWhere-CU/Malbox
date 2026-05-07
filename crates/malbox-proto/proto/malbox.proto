@@ -1,0 +1,44 @@
+syntax = "proto3";
+package malbox;
+
+service Bootstrap {
+  rpc ProvideCerts(CertsRequest) returns (Ack);
+}
+
+message CertsRequest {
+  string server_cert_pem = 1;
+  string server_key_pem = 2;
+  string root_ca_pem = 3;
+}
+
+message Ack {
+  bool success = 1;
+  string error_message = 2;
+}
+
+service Agent {
+  rpc UploadSample(stream FileChunk) returns (Ack);
+  rpc Analyze(AnalysisRequest) returns (stream Event);
+}
+
+message FileChunk {
+  bytes data = 1;
+  bool is_first = 2;
+  string filename = 3;
+}
+
+message AnalysisRequest {
+  uint32 timeout_secs = 1;
+}
+
+message Event {
+  uint64 timestamp = 1;
+  oneof kind {
+    AnlysisCompleted done = 2; // we should add ETW and API hook events to get sent back to host as they happen
+  }
+}
+
+message AnlysisCompleted {
+  int32 exit_code = 1;
+  uint64 runtime_ms = 2;
+}
