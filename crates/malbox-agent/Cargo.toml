@@ -1,0 +1,13 @@
+[package]
+name = "malbox-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+malbox-proto = { path = "../malbox-proto" }
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.14.6", features = ["tls-ring"] }
+rcgen = {version = "0.14.7", features = ["pem", "x509-parser"] }

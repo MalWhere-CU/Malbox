@@ -258,8 +258,8 @@ impl VmManager {
                 network = Some(net);
             }
         }
-        let mut ip_addr = String::new();
-        println!("Waiting till machine gets an IP");
+        let mut ip_addr: String = String::new();
+        info!("Waiting till machine gets an IP");
         match network {
             Some(net) => {
                 if let Some(ip) = VmManager::wait_for_ip_from_mac(
@@ -285,7 +285,7 @@ impl VmManager {
                 ));
             }
         };
-        println!("Machine got an IP: {}", ip_addr);
+        info!("Machine got an IP: {}", ip_addr);
         Ok(JobDomain {
             domain,
             job_uuid,

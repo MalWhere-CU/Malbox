@@ -5,7 +5,7 @@ uri = "qemu:///system"
 master_nvram = "/home/mohamed/vm-images/master/master_vars.fd"
 # Path to the gold master qcow2 image (read-only)
 # master_image = "/home/mohamed/vm-images/alpine-gold.qcow2"
-master_image = "/home/mohamed/vm-images/master/master.qcow2"
+master_image = "/home/mohamed/vm-images/master/testmaster.qcow2"
 # Directory for qcow2 overlays (per-job clones)
 overlay_dir = "/home/mohamed/vm-images/overlays/"
 # Directory for analysis reports

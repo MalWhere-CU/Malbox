@@ -2,13 +2,28 @@ syntax = "proto3";
 package malbox;
 
 service Bootstrap {
-  rpc ProvideCerts(CertsRequest) returns (Ack);
+  rpc WhoAmI(Who) returns (IpMsg);
+  rpc RequestCsr(RequestCSREnvelope) returns (CSREnvelope);
+  rpc SwitchConnection(SignedCertEnvelope) returns (Ack);
+}
+message Who{}
+message IpMsg {
+  string ip_addr = 1;
 }
 
-message CertsRequest {
-  string server_cert_pem = 1;
-  string server_key_pem = 2;
+
+message RequestCSREnvelope {
+  string ip_addr = 1;
+  string job_uuid = 2;
   string root_ca_pem = 3;
+}
+
+message CSREnvelope {
+  string csr_pem = 1;
+}
+
+message SignedCertEnvelope {
+  string signed_cert_pem = 1;
 }
 
 message Ack {
@@ -17,9 +32,15 @@ message Ack {
 }
 
 service Agent {
+  rpc HelloSvc(Hello) returns (Hello); // used as a test
   rpc UploadSample(stream FileChunk) returns (Ack);
-  rpc Analyze(AnalysisRequest) returns (stream Event);
+  // rpc Analyze(AnalysisRequest) returns (stream Event);
 }
+
+message Hello {
+  string msg = 1;
+}
+
 
 message FileChunk {
   bytes data = 1;
