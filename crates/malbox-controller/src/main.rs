@@ -3,8 +3,8 @@ use std::{net::IpAddr, path::Path, time::Duration};
 use anyhow::Context;
 use config::Config;
 use malbox_proto::pb::{
-    FileChunk, Hello, RequestCsrEnvelope, SignedCertEnvelope, Who, agent_client::AgentClient,
-    bootstrap_client::BootstrapClient,
+    AnalysisRequest, FileChunk, Hello, RequestCsrEnvelope, SignedCertEnvelope, Who,
+    agent_client::AgentClient, bootstrap_client::BootstrapClient,
 };
 use tokio::{
     fs::File,
@@ -13,7 +13,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{
     Request,
-    transport::{Certificate, ClientTlsConfig, Identity},
+    transport::{Certificate, Channel, ClientTlsConfig, Identity},
 };
 use vm::VmManager;
 
@@ -22,7 +22,7 @@ use crate::cert::JobCerts;
 mod cert;
 mod config;
 mod vm;
-
+mod volatility;
 async fn test_bootstrap(ip: &str) -> anyhow::Result<JobCerts> {
     let url = format!("http://{}:50055", ip);
     println!("Waiting for Agent Bootstrap service at {}...", url);
@@ -82,7 +82,7 @@ async fn test_mtls_hello(
     agent_ip: &str,
     controller_certs: &cert::JobCerts,
     local_file_path: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<AgentClient<Channel>> {
     let ca_cert_pem = controller_certs.root_ca_cert.pem();
     let controller_cert_pem = controller_certs.controller_cert.pem();
     let controller_key_pem = controller_certs.controller_key.serialize_pem();
@@ -156,7 +156,7 @@ async fn test_mtls_hello(
         .into_inner();
     if response.success {
         println!("File uploaded successfully: {}", filename);
-        Ok(())
+        Ok(agent_client)
     } else {
         Err(anyhow::anyhow!(
             "Upload rejected: {}",
@@ -188,7 +188,20 @@ async fn main() {
             .expect("Expected a line");
         match input.trim() {
             "destroy" => {
+                let job_report_dir = conf.paths.report_dir.join(&jd.job_uuid);
+                let dump_path = job_report_dir.join("memory.dmp");
                 jd.teardown();
+                println!("Starting Volatility 3 analysis.");
+                let volatility_report = volatility::analyze_dump(&dump_path).await.unwrap();
+                let report_path = job_report_dir.join("volatility.json");
+                tokio::fs::write(
+                    &report_path,
+                    serde_json::to_string_pretty(&volatility_report).unwrap(),
+                )
+                .await
+                .unwrap();
+                println!("Volatility report saved to {}", report_path.display());
+
                 break;
             }
             "state" => {
@@ -196,8 +209,60 @@ async fn main() {
             }
             "bootstrap" => {
                 let certs = test_bootstrap(&jd.ip_addr).await.unwrap();
-                if let Err(e) = test_mtls_hello(&jd.ip_addr, &certs, "test.ps1").await {
-                    println!("mTLS hello test failed: {}", e);
+                let mut client = match test_mtls_hello(&jd.ip_addr, &certs, "malware.exe").await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        println!("Failed to start mtls server: {}", e);
+                        break;
+                    }
+                };
+                let mut event_stream = match client
+                    .analyze(AnalysisRequest {
+                        timeout_secs: 300,
+                        sample_name: "malware.exe".to_string(),
+                    })
+                    .await
+                {
+                    Ok(ev) => ev.into_inner(),
+                    Err(e) => {
+                        println!("Failed to fetch event stream: {}", e);
+                        break;
+                    }
+                };
+                let mut exit_code = -1;
+                let mut runtime_ms = 0;
+                'event_loop: while let Some(ev) = match event_stream.message().await {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        println!("Deformed event message: {}", e);
+                        continue 'event_loop;
+                    }
+                } {
+                    if let Some(kind) = ev.kind {
+                        match kind {
+                            malbox_proto::pb::event::Kind::Done(done) => {
+                                exit_code = done.exit_code;
+                                runtime_ms = done.runtime_ms;
+                            }
+                        }
+                    }
+                }
+                println!("Analysis: exit={} runtime={}ms", exit_code, runtime_ms);
+                let job_report_dir = conf.paths.report_dir.join(&jd.job_uuid);
+                tokio::fs::create_dir_all(&job_report_dir).await.unwrap();
+                let dump_path = job_report_dir.join("memory.dmp");
+                println!("Dumping full VM memory to {}...", dump_path.display());
+                jd.dump_memory(&dump_path).unwrap();
+                println!("Memory Dump complete");
+                let chmod_status = tokio::process::Command::new("sudo")
+                    .arg("chmod")
+                    .arg("644")
+                    .arg(&dump_path)
+                    .status()
+                    .await
+                    .unwrap();
+                if !chmod_status.success() {
+                    eprintln!("Warning: Failed to change permissions on the memory dump.");
                 }
             }
             _ => {}

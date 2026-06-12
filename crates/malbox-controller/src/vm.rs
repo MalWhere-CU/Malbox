@@ -355,4 +355,10 @@ impl JobDomain {
             _ => Ok(DomainState::Unknown),
         }
     }
+    pub fn dump_memory(&self, output_path: &Path) -> anyhow::Result<()> {
+        self.domain
+            .core_dump(&output_path.to_string_lossy(), 16)
+            .context("Failed to create memory dump")?;
+        Ok(())
+    }
 }

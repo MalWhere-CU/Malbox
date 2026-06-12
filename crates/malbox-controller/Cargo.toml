@@ -18,6 +18,8 @@ virt-sys = "0.3.1"
 anyhow = "1.0"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.150"
+phf = { version = "0.11", features = ["macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 tracing-appender = "0.2"

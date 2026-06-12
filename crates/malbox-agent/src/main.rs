@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::select! {
         res = bootstrap_server => res?,
         _ = done_rx => {
-            println!("✅ Bootstrap complete. Insecure channel closed.");
+            println!("Bootstrap complete. Insecure channel closed.");
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             let final_state = state.clone();
             tokio::spawn(async move {

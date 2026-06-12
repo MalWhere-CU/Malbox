@@ -37,6 +37,19 @@ pub struct Hello {
     #[prost(string, tag = "1")]
     pub msg: ::prost::alloc::string::String,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetDroppedFilesRequest {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DroppedFileEvent {
+    #[prost(string, tag = "1")]
+    pub path: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub is_file_beginning: bool,
+    #[prost(uint64, tag = "3")]
+    pub total_size: u64,
+    #[prost(bytes = "vec", tag = "4")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FileChunk {
     #[prost(bytes = "vec", tag = "1")]
@@ -46,10 +59,12 @@ pub struct FileChunk {
     #[prost(string, tag = "3")]
     pub filename: ::prost::alloc::string::String,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AnalysisRequest {
     #[prost(uint32, tag = "1")]
     pub timeout_secs: u32,
+    #[prost(string, tag = "2")]
+    pub sample_name: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Event {
@@ -64,11 +79,11 @@ pub mod event {
     pub enum Kind {
         /// we should add ETW and API hook events to get sent back to host as they happen
         #[prost(message, tag = "2")]
-        Done(super::AnlysisCompleted),
+        Done(super::AnalysisCompleted),
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AnlysisCompleted {
+pub struct AnalysisCompleted {
     #[prost(int32, tag = "1")]
     pub exit_code: i32,
     #[prost(uint64, tag = "2")]
@@ -631,6 +646,27 @@ pub mod agent_client {
             req.extensions_mut().insert(GrpcMethod::new("malbox.Agent", "UploadSample"));
             self.inner.client_streaming(req, path, codec).await
         }
+        pub async fn analyze(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AnalysisRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::Event>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/malbox.Agent/Analyze");
+            let mut req = request.into_request();
+            req.extensions_mut().insert(GrpcMethod::new("malbox.Agent", "Analyze"));
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -654,6 +690,16 @@ pub mod agent_server {
             &self,
             request: tonic::Request<tonic::Streaming<super::FileChunk>>,
         ) -> std::result::Result<tonic::Response<super::Ack>, tonic::Status>;
+        /// Server streaming response type for the Analyze method.
+        type AnalyzeStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::Event, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        async fn analyze(
+            &self,
+            request: tonic::Request<super::AnalysisRequest>,
+        ) -> std::result::Result<tonic::Response<Self::AnalyzeStream>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct AgentServer<T> {
@@ -815,6 +861,52 @@ pub mod agent_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.client_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/malbox.Agent/Analyze" => {
+                    #[allow(non_camel_case_types)]
+                    struct AnalyzeSvc<T: Agent>(pub Arc<T>);
+                    impl<
+                        T: Agent,
+                    > tonic::server::ServerStreamingService<super::AnalysisRequest>
+                    for AnalyzeSvc<T> {
+                        type Response = super::Event;
+                        type ResponseStream = T::AnalyzeStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AnalysisRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Agent>::analyze(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = AnalyzeSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

@@ -1,13 +1,55 @@
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 
-use malbox_proto::pb::{Ack, FileChunk, Hello};
-use tokio::{fs::File, io::AsyncWriteExt};
+use malbox_proto::pb::{Ack, AnalysisCompleted, AnalysisRequest, Event, FileChunk, Hello, event};
+use tokio::{fs::File, io::AsyncWriteExt, process::Command, sync::mpsc};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
 pub struct AgentService;
 
+fn prepare_execution_command(sample_path: &Path) -> Command {
+    let ext = sample_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    match ext.as_str() {
+        "exe" | "com" | "scr" | "bat" | "cmd" => Command::new(sample_path),
+        "ps1" => {
+            let mut cmd = Command::new("powershell.exe");
+            cmd.arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-File")
+                .arg(sample_path);
+            cmd
+        }
+        "js" | "jse" => {
+            let mut cmd = Command::new("wscript.exe");
+            cmd.arg(sample_path);
+            cmd
+        }
+        "vbs" | "vbe" => {
+            let mut cmd = Command::new("wscript.exe");
+            cmd.arg(sample_path);
+            cmd
+        }
+        "dll" => {
+            let mut cmd = Command::new("rundll32.exe");
+            cmd.arg(sample_path).arg("DllMain");
+            cmd
+        }
+        _ => Command::new(sample_path),
+    }
+}
+
 #[tonic::async_trait]
 impl malbox_proto::pb::agent_server::Agent for AgentService {
+    type AnalyzeStream = ReceiverStream<Result<Event, Status>>;
     async fn hello_svc(&self, request: Request<Hello>) -> Result<Response<Hello>, Status> {
         println!("hi {}, I'm agent", request.into_inner().msg);
         Ok(Response::new(Hello {
@@ -67,5 +109,66 @@ impl malbox_proto::pb::agent_server::Agent for AgentService {
             success: true,
             error_message: "".to_owned(),
         }))
+    }
+    async fn analyze(
+        &self,
+        request: Request<AnalysisRequest>,
+    ) -> Result<Response<Self::AnalyzeStream>, Status> {
+        let req = request.into_inner();
+        let safe_filename = PathBuf::from(&req.sample_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| Status::invalid_argument("Invalid sample name"))?
+            .to_string();
+        let sample_path = PathBuf::from(format!(
+            "C:\\Users\\mohamed\\Desktop\\sample\\{}",
+            safe_filename
+        ));
+        let (tx, rx) = mpsc::channel(128);
+        tokio::spawn(async move {
+            let start = std::time::Instant::now();
+            let mut cmd = prepare_execution_command(&sample_path);
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            let mut child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    let error_msg = if e.raw_os_error() == Some(193) {
+                        format!(
+                            "OS Error 193: '{}' is not a valid Win32 executable.",
+                            req.sample_name
+                        )
+                    } else {
+                        e.to_string()
+                    };
+                    let _ = tx.send(Err(Status::internal(error_msg))).await;
+                    return;
+                }
+            };
+            let result =
+                tokio::time::timeout(Duration::from_secs(req.timeout_secs as u64), child.wait())
+                    .await;
+            let (exit_code, runtime_ms) = match result {
+                Ok(Ok(status)) => (
+                    status.code().unwrap_or(-1),
+                    start.elapsed().as_millis() as u64,
+                ),
+                _ => (-1, start.elapsed().as_millis() as u64),
+            };
+            let _ = child.kill().await;
+            let _ = tx
+                .send(Ok(Event {
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                    kind: Some(event::Kind::Done(AnalysisCompleted {
+                        exit_code,
+                        runtime_ms,
+                    })),
+                }))
+                .await;
+        });
+        let stream = ReceiverStream::new(rx);
+        Ok(Response::new(stream))
     }
 }

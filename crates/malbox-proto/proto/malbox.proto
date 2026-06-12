@@ -34,13 +34,22 @@ message Ack {
 service Agent {
   rpc HelloSvc(Hello) returns (Hello); // used as a test
   rpc UploadSample(stream FileChunk) returns (Ack);
-  // rpc Analyze(AnalysisRequest) returns (stream Event);
+  rpc Analyze(AnalysisRequest) returns (stream Event);
+  // rpc GetDroppedFiles(GetDroppedFilesRequest) returns (stream DroppedFileEvent);
 }
 
 message Hello {
   string msg = 1;
 }
 
+message GetDroppedFilesRequest {}
+
+message DroppedFileEvent {
+  string path = 1;
+  bool is_file_beginning = 2;
+  uint64 total_size = 3;
+  bytes data = 4;
+}
 
 message FileChunk {
   bytes data = 1;
@@ -50,16 +59,17 @@ message FileChunk {
 
 message AnalysisRequest {
   uint32 timeout_secs = 1;
+  string sample_name = 2;
 }
 
 message Event {
   uint64 timestamp = 1;
   oneof kind {
-    AnlysisCompleted done = 2; // we should add ETW and API hook events to get sent back to host as they happen
+    AnalysisCompleted done = 2; // we should add ETW and API hook events to get sent back to host as they happen
   }
 }
 
-message AnlysisCompleted {
+message AnalysisCompleted {
   int32 exit_code = 1;
   uint64 runtime_ms = 2;
 }
