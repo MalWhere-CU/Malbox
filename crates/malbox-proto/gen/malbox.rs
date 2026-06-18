@@ -66,7 +66,7 @@ pub struct AnalysisRequest {
     #[prost(string, tag = "2")]
     pub sample_name: ::prost::alloc::string::String,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Event {
     #[prost(uint64, tag = "1")]
     pub timestamp: u64,
@@ -75,19 +75,21 @@ pub struct Event {
 }
 /// Nested message and enum types in `Event`.
 pub mod event {
-    #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Kind {
-        /// we should add ETW and API hook events to get sent back to host as they happen
+        /// probably won't add other event types but just in case
         #[prost(message, tag = "2")]
         Done(super::AnalysisCompleted),
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AnalysisCompleted {
     #[prost(int32, tag = "1")]
     pub exit_code: i32,
     #[prost(uint64, tag = "2")]
     pub runtime_ms: u64,
+    #[prost(string, tag = "3")]
+    pub features_json: ::prost::alloc::string::String,
 }
 /// Generated client implementations.
 pub mod bootstrap_client {

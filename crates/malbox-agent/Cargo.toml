@@ -12,3 +12,22 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.18"
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 rcgen = {version = "0.14.7", features = ["pem", "x509-parser"] }
+rand = "0.10.1"
+bson = "3.1.0"
+serde_json = "1.0.150"
+serde = { version = "1.0.150", features = ["derive"]}
+walkdir = "2.5.0"
+windows-sys = { version = "0.61.2", features = [
+    "Wdk_System_SystemInformation",
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_LibraryLoader",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Diagnostics_Debug",
+]}

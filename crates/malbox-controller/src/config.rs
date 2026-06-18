@@ -22,6 +22,7 @@ pub struct PathsConfig {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
+    pub listen_addr: String,
     pub libvirt: LibvirtConfig,
     pub vm: VmConfig,
     pub paths: PathsConfig,

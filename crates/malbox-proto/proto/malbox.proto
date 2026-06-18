@@ -6,6 +6,7 @@ service Bootstrap {
   rpc RequestCsr(RequestCSREnvelope) returns (CSREnvelope);
   rpc SwitchConnection(SignedCertEnvelope) returns (Ack);
 }
+
 message Who{}
 message IpMsg {
   string ip_addr = 1;
@@ -65,11 +66,13 @@ message AnalysisRequest {
 message Event {
   uint64 timestamp = 1;
   oneof kind {
-    AnalysisCompleted done = 2; // we should add ETW and API hook events to get sent back to host as they happen
+    AnalysisCompleted done = 2; // probably won't add other event types but just in case
   }
 }
 
 message AnalysisCompleted {
   int32 exit_code = 1;
   uint64 runtime_ms = 2;
+  string features_json = 3;
 }
+

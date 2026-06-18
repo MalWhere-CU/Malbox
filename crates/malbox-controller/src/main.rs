@@ -1,4 +1,4 @@
-use std::{net::IpAddr, path::Path, time::Duration};
+use std::{fs, net::IpAddr, path::Path, time::Duration};
 
 use anyhow::Context;
 use config::Config;
@@ -21,6 +21,7 @@ use crate::cert::JobCerts;
 
 mod cert;
 mod config;
+mod job;
 mod vm;
 mod volatility;
 async fn test_bootstrap(ip: &str) -> anyhow::Result<JobCerts> {
@@ -188,20 +189,7 @@ async fn main() {
             .expect("Expected a line");
         match input.trim() {
             "destroy" => {
-                let job_report_dir = conf.paths.report_dir.join(&jd.job_uuid);
-                let dump_path = job_report_dir.join("memory.dmp");
                 jd.teardown();
-                println!("Starting Volatility 3 analysis.");
-                let volatility_report = volatility::analyze_dump(&dump_path).await.unwrap();
-                let report_path = job_report_dir.join("volatility.json");
-                tokio::fs::write(
-                    &report_path,
-                    serde_json::to_string_pretty(&volatility_report).unwrap(),
-                )
-                .await
-                .unwrap();
-                println!("Volatility report saved to {}", report_path.display());
-
                 break;
             }
             "state" => {
@@ -209,7 +197,7 @@ async fn main() {
             }
             "bootstrap" => {
                 let certs = test_bootstrap(&jd.ip_addr).await.unwrap();
-                let mut client = match test_mtls_hello(&jd.ip_addr, &certs, "malware.exe").await {
+                let mut client = match test_mtls_hello(&jd.ip_addr, &certs, "mal_1.exe").await {
                     Ok(client) => client,
                     Err(e) => {
                         println!("Failed to start mtls server: {}", e);
@@ -219,7 +207,7 @@ async fn main() {
                 let mut event_stream = match client
                     .analyze(AnalysisRequest {
                         timeout_secs: 300,
-                        sample_name: "malware.exe".to_string(),
+                        sample_name: "mal_1.exe".to_string(),
                     })
                     .await
                 {
@@ -231,6 +219,7 @@ async fn main() {
                 };
                 let mut exit_code = -1;
                 let mut runtime_ms = 0;
+                let mut features = String::new();
                 'event_loop: while let Some(ev) = match event_stream.message().await {
                     Ok(ev) => ev,
                     Err(e) => {
@@ -243,27 +232,14 @@ async fn main() {
                             malbox_proto::pb::event::Kind::Done(done) => {
                                 exit_code = done.exit_code;
                                 runtime_ms = done.runtime_ms;
+                                features = done.features_json;
                             }
                         }
                     }
                 }
                 println!("Analysis: exit={} runtime={}ms", exit_code, runtime_ms);
-                let job_report_dir = conf.paths.report_dir.join(&jd.job_uuid);
-                tokio::fs::create_dir_all(&job_report_dir).await.unwrap();
-                let dump_path = job_report_dir.join("memory.dmp");
-                println!("Dumping full VM memory to {}...", dump_path.display());
-                jd.dump_memory(&dump_path).unwrap();
-                println!("Memory Dump complete");
-                let chmod_status = tokio::process::Command::new("sudo")
-                    .arg("chmod")
-                    .arg("644")
-                    .arg(&dump_path)
-                    .status()
-                    .await
-                    .unwrap();
-                if !chmod_status.success() {
-                    eprintln!("Warning: Failed to change permissions on the memory dump.");
-                }
+                let file_path = "output.txt";
+                fs::write(file_path, features).unwrap();
             }
             _ => {}
         }
