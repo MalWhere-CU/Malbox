@@ -1,247 +1,73 @@
-use std::{fs, net::IpAddr, path::Path, time::Duration};
+use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    routing::{get, post},
+};
 use config::Config;
-use malbox_proto::pb::{
-    AnalysisRequest, FileChunk, Hello, RequestCsrEnvelope, SignedCertEnvelope, Who,
-    agent_client::AgentClient, bootstrap_client::BootstrapClient,
-};
-use tokio::{
-    fs::File,
-    io::{AsyncReadExt, BufReader},
-};
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::{
-    Request,
-    transport::{Certificate, Channel, ClientTlsConfig, Identity},
-};
+use tokio::net::TcpListener;
+use tower_http::trace::TraceLayer;
 use vm::VmManager;
 
-use crate::cert::JobCerts;
+use crate::job::JobTracker;
 
 mod cert;
 mod config;
 mod job;
+mod routes;
 mod vm;
 mod volatility;
-async fn test_bootstrap(ip: &str) -> anyhow::Result<JobCerts> {
-    let url = format!("http://{}:50055", ip);
-    println!("Waiting for Agent Bootstrap service at {}...", url);
-    let mut client = loop {
-        match BootstrapClient::connect(url.clone()).await {
-            Ok(c) => break c,
-            Err(_) => {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-        }
-    };
-    let controller_ip = client
-        .who_am_i(tonic::Request::new(Who {}))
-        .await
-        .unwrap()
-        .into_inner()
-        .ip_addr;
-    println!("Connected to Agent Bootstrap service!");
-    let certs = cert::generate_job_certs("x012", controller_ip.parse::<IpAddr>().unwrap())?;
-    let req = tonic::Request::new(RequestCsrEnvelope {
-        ip_addr: ip.to_owned(),
-        root_ca_pem: certs.root_ca_cert.pem(),
-        job_uuid: "x012".to_owned(),
-    });
-    let csr: String = match client.request_csr(req).await {
-        Ok(res) => {
-            let r = res.into_inner();
-            r.csr_pem
-        }
-        Err(e) => {
-            println!("Failed to send certs to agent: {}", e);
-            return Err(anyhow::anyhow!("failed to request csr from agent"));
-        }
-    };
-    let agent_cert = certs.sign_agent_csr(&csr)?;
-    let req = tonic::Request::new(SignedCertEnvelope {
-        signed_cert_pem: agent_cert.pem(),
-    });
-    match client.switch_connection(req).await {
-        Ok(res) => {
-            let res = res.into_inner();
-            if res.success {
-                println!("Key Exchange complete");
-            } else {
-                println!("Key exchange failed: {}", res.error_message);
-            }
-        }
-        Err(e) => {
-            println!("Failed to Switch connection to mTLS: {}", e);
-            return Err(anyhow::anyhow!("failed to switch connection to mTLS"));
-        }
-    }
-    Ok(certs)
+
+#[derive(Clone)]
+pub struct AppState {
+    pub tracker: JobTracker,
+    pub vm_mgr: Arc<VmManager>,
+    pub config: Config,
 }
 
-async fn test_mtls_hello(
-    agent_ip: &str,
-    controller_certs: &cert::JobCerts,
-    local_file_path: &str,
-) -> anyhow::Result<AgentClient<Channel>> {
-    let ca_cert_pem = controller_certs.root_ca_cert.pem();
-    let controller_cert_pem = controller_certs.controller_cert.pem();
-    let controller_key_pem = controller_certs.controller_key.serialize_pem();
-    let client_tls = ClientTlsConfig::new()
-        .identity(Identity::from_pem(
-            &controller_cert_pem,
-            &controller_key_pem,
-        ))
-        .ca_certificate(Certificate::from_pem(ca_cert_pem));
-
-    let agent_url = format!("https://{}:50055", agent_ip);
-    println!("{}", agent_url);
-    let channel = loop {
-        match tonic::transport::Channel::from_shared(agent_url.clone())?
-            .tls_config(client_tls.clone())?
-            .connect()
-            .await
-        {
-            Ok(c) => break c,
-            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
-        }
-    };
-    let mut agent_client = AgentClient::new(channel);
-    let hello_req = tonic::Request::new(Hello {
-        msg: "controller".to_owned(),
-    });
-    let response = agent_client.hello_svc(hello_req).await?;
-    println!("Hi {}, I'm controller", response.into_inner().msg);
-    let filename = std::path::Path::new(local_file_path)
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
-        .to_string_lossy()
-        .to_string();
-    let file = File::open(local_file_path).await?;
-    let mut reader = BufReader::with_capacity(32 * 1024, file);
-    let (tx, rx) = tokio::sync::mpsc::channel(4);
-    let filename_clone = filename.clone();
-    tokio::spawn(async move {
-        let mut is_first = true;
-        let mut buffer = vec![0u8; 32 * 1024];
-        loop {
-            match reader.read(&mut buffer).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    let chunk = FileChunk {
-                        data: buffer[..n].to_vec(),
-                        is_first,
-                        filename: if is_first {
-                            filename_clone.clone()
-                        } else {
-                            String::new()
-                        },
-                    };
-                    if tx.send(chunk).await.is_err() {
-                        break;
-                    }
-                    is_first = false;
-                }
-                Err(e) => {
-                    eprintln!("Read error: {}", e);
-                    break;
-                }
-            }
-        }
-    });
-    let stream = ReceiverStream::new(rx);
-
-    let response = agent_client
-        .upload_sample(Request::new(stream))
-        .await?
-        .into_inner();
-    if response.success {
-        println!("File uploaded successfully: {}", filename);
-        Ok(agent_client)
-    } else {
-        Err(anyhow::anyhow!(
-            "Upload rejected: {}",
-            response.error_message
-        ))
-    }
+async fn serve_frontend() -> impl axum::response::IntoResponse {
+    let html = include_str!("../../../frontend.html");
+    axum::response::Html(html)
 }
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let path = Path::new("config.EXAMPLE.toml");
-    let conf = Config::from_file(path)
-        .with_context(|| format!("Failed to load configuration from {}", path.display()))
+    let config = Config::from_file(path)
+        .with_context(|| format!("Failed to load config from {}", path.display()))
         .unwrap();
-    let vm_mgr = VmManager::new(conf.to_owned())
-        .with_context(|| format!("Failed to connect to libvirt at {}", conf.libvirt.uri))
-        .unwrap();
-    println!(
-        "Connected successfully to libvirt at {}",
-        vm_mgr.conn.get_uri().unwrap()
+
+    let vm_mgr = Arc::new(
+        VmManager::new(config.clone())
+            .with_context(|| format!("Failed to connect to libvirt at {}", config.libvirt.uri))
+            .unwrap(),
     );
-    let jd = vm_mgr.create_job_domain().unwrap();
-    println!("Started VM: {}", jd.vm_name);
-    println!("MAC ADDRESS: {}", jd.mac);
-    loop {
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .expect("Expected a line");
-        match input.trim() {
-            "destroy" => {
-                jd.teardown();
-                break;
-            }
-            "state" => {
-                println!("{:?}", jd.get_state());
-            }
-            "bootstrap" => {
-                let certs = test_bootstrap(&jd.ip_addr).await.unwrap();
-                let mut client = match test_mtls_hello(&jd.ip_addr, &certs, "mal_1.exe").await {
-                    Ok(client) => client,
-                    Err(e) => {
-                        println!("Failed to start mtls server: {}", e);
-                        break;
-                    }
-                };
-                let mut event_stream = match client
-                    .analyze(AnalysisRequest {
-                        timeout_secs: 300,
-                        sample_name: "mal_1.exe".to_string(),
-                    })
-                    .await
-                {
-                    Ok(ev) => ev.into_inner(),
-                    Err(e) => {
-                        println!("Failed to fetch event stream: {}", e);
-                        break;
-                    }
-                };
-                let mut exit_code = -1;
-                let mut runtime_ms = 0;
-                let mut features = String::new();
-                'event_loop: while let Some(ev) = match event_stream.message().await {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        println!("Deformed event message: {}", e);
-                        continue 'event_loop;
-                    }
-                } {
-                    if let Some(kind) = ev.kind {
-                        match kind {
-                            malbox_proto::pb::event::Kind::Done(done) => {
-                                exit_code = done.exit_code;
-                                runtime_ms = done.runtime_ms;
-                                features = done.features_json;
-                            }
-                        }
-                    }
-                }
-                println!("Analysis: exit={} runtime={}ms", exit_code, runtime_ms);
-                let file_path = "output.txt";
-                fs::write(file_path, features).unwrap();
-            }
-            _ => {}
-        }
-    }
+    println!("Connected to libvirt at {}", vm_mgr.conn.get_uri().unwrap());
+
+    let tracker = JobTracker::new();
+    let state = AppState {
+        tracker,
+        vm_mgr,
+        config: config.clone(),
+    };
+
+    let app = Router::new()
+        .route("/", get(serve_frontend))
+        .route("/jobs", post(routes::submit_job))
+        .route(
+            "/jobs/{id}",
+            get(routes::get_job).delete(routes::cancel_job),
+        )
+        .route("/jobs/{id}/events", get(routes::job_events))
+        .layer(TraceLayer::new_for_http())
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
+        .with_state(state);
+
+    let listener = TcpListener::bind(&config.listen_addr).await.unwrap();
+    println!("Listening on {}", config.listen_addr);
+    axum::serve(listener, app).await.unwrap();
 }
