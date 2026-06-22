@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::sync::atomic::Ordering;
 
-use crate::pipes::{raw::NamedPipe, raw::BUFSIZE, CommandCtx};
+use crate::pipes::{CommandCtx, raw::BUFSIZE, raw::NamedPipe};
 
 /// Accept loop for the command pipe, mirroring CAPE's `PipeServer.run` with
 /// `message=True`. Each accepted connection is handed to a dedicated thread so
@@ -17,7 +17,7 @@ pub fn serve_command_pipe(ctx: CommandCtx) {
         let pipe = match NamedPipe::create_command(&pipe_name) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[cmd] failed to create pipe instance: {}", e);
+                eprintln!("[cmd] failed to create pipe: {}", e);
                 break;
             }
         };

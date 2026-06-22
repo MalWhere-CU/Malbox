@@ -32,47 +32,47 @@ impl malbox_proto::pb::agent_server::Agent for AgentService {
         let first_chunk = match stream
             .message()
             .await
-            .map_err(|e| Status::internal(format!("Failed to read stream: {}", e)))?
+            .map_err(|e| Status::internal(format!("failed to read stream: {}", e)))?
         {
             Some(chunk) => chunk,
-            None => return Err(Status::invalid_argument("Empty file stream")),
+            None => return Err(Status::invalid_argument("file stream is empty")),
         };
         let filename = first_chunk.filename.trim();
         if filename.is_empty() {
-            return Err(Status::invalid_argument("Filename cannot be empty"));
+            return Err(Status::invalid_argument("filename empty"));
         }
         let upload_dir = PathBuf::from("C:\\Users\\mohamed\\Desktop\\sample");
         tokio::fs::create_dir_all(&upload_dir)
             .await
-            .map_err(|e| Status::internal(format!("Failed to create upload dir: {}", e)))?;
+            .map_err(|e| Status::internal(format!("upload dir creation failed: {}", e)))?;
         let file_path = upload_dir.join(filename);
         if !file_path.starts_with(&upload_dir) {
-            return Err(Status::invalid_argument("Invalid filename"));
+            return Err(Status::invalid_argument("filename invalid"));
         }
         let mut file = File::create(&file_path)
             .await
-            .map_err(|e| Status::internal(format!("Failed to write chunk: {}", e)))?;
+            .map_err(|e| Status::internal(format!("failed to write chunk; {}", e)))?;
 
         file.write_all(&first_chunk.data)
             .await
-            .map_err(|e| Status::internal(format!("Failed to write chunk: {}", e)))?;
+            .map_err(|e| Status::internal(format!("failed to write chunk: {}", e)))?;
 
         let mut total_bytes = first_chunk.data.len() as u64;
         while let Some(chunk) = stream
             .message()
             .await
-            .map_err(|e| Status::internal(format!("Stream error: {}", e)))?
+            .map_err(|e| Status::internal(format!("error: {}", e)))?
         {
             file.write_all(&chunk.data)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to write chunk: {}", e)))?;
+                .map_err(|e| Status::internal(format!("failed to write chunk: {}", e)))?;
             total_bytes += chunk.data.len() as u64;
         }
         file.flush()
             .await
-            .map_err(|e| Status::internal(format!("Failed to flush file: {}", e)))?;
+            .map_err(|e| Status::internal(format!("failed  to flush file: {}", e)))?;
         drop(file);
-        println!("Received file: {} ({} bytes)", filename, total_bytes);
+        println!("received {} of size ({} bytes)", filename, total_bytes);
         Ok(Response::new(Ack {
             success: true,
             error_message: "".to_owned(),

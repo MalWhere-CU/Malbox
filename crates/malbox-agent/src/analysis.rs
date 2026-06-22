@@ -46,7 +46,6 @@ pub async fn run_analysis(config: AnalysisConfig) -> anyhow::Result<AnalysisResu
 
     let cmd_ctx = ctx.clone();
     let cmd_thread = std::thread::spawn(move || command::serve_command_pipe(cmd_ctx));
-
     let mut sample_process = Process {
         pid: 0,
         tid: 0,
@@ -54,6 +53,7 @@ pub async fn run_analysis(config: AnalysisConfig) -> anyhow::Result<AnalysisResu
         h_thread: None,
         suspended: true,
     };
+
     Command::new("net")
         .args(["stop", "winmgmt", "/y"])
         .status()
@@ -66,9 +66,11 @@ pub async fn run_analysis(config: AnalysisConfig) -> anyhow::Result<AnalysisResu
         .args(["start", "winmgmt"])
         .status()
         .expect("failed to start winmgmt");
+
     sample_process
         .execute(&config.sample_path, None, true)
         .unwrap();
+
     let sample_name = config
         .sample_path
         .file_name()
@@ -80,7 +82,6 @@ pub async fn run_analysis(config: AnalysisConfig) -> anyhow::Result<AnalysisResu
         .unwrap()
         .register_process(sample_process.pid, 0, sample_name);
     logserver::spawn_reader(&ctx, sample_process.pid)?;
-
     sample_process
         .inject(Some(config.sample_path.to_str().unwrap()), false, &state)
         .unwrap();
@@ -106,8 +107,6 @@ pub async fn run_analysis(config: AnalysisConfig) -> anyhow::Result<AnalysisResu
     let runtime_ms = start.elapsed().as_millis() as u64;
     signal_shutdown(&state).ok();
     drain_logservers(&logserver_tasks, Duration::from_secs(3)).await;
-    // Stop the command server: clear the flag, then connect a one-shot client so
-    // its blocking ConnectNamedPipe returns and the accept loop sees do_run=false.
     do_run.store(false, Ordering::Relaxed);
     crate::pipes::raw::nudge_server(&state.command_pipe);
     let _ = cmd_thread.join();
@@ -127,9 +126,6 @@ pub async fn run_analysis(config: AnalysisConfig) -> anyhow::Result<AnalysisResu
 }
 
 fn signal_shutdown(state: &MonitorState) -> anyhow::Result<()> {
-    // Open the named mutex capemon watches and set it
-    // TODO: verify exact signaling direction against capemon source
-    // For now, create the mutex object so capemon sees it
     let name = CString::new(state.shutdown_mutex.as_str())?;
     unsafe {
         let h = windows_sys::Win32::System::Threading::CreateMutexA(
@@ -154,9 +150,6 @@ async fn drain_logservers(tasks: &Arc<Mutex<Vec<JoinHandle<()>>>>, timeout: Dura
         let mut lock = tasks.lock().unwrap();
         std::mem::take(&mut *lock)
     };
-    // std thread joins block, so run them on a blocking task and bound the wait.
-    // If the budget elapses the joins keep finishing in the background; the
-    // reader threads end on their own once capemon closes the pipes.
     let join_all = tokio::task::spawn_blocking(move || {
         for h in handles {
             let _ = h.join();

@@ -8,7 +8,7 @@ use axum::{
 };
 use futures::{Stream, StreamExt};
 use serde::Serialize;
-use tokio::fs;
+use tokio::{fs, sync::broadcast};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{AppState, job::JobEvent};
@@ -33,17 +33,14 @@ pub async fn submit_job(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
     {
-        let raw_filename = field
-            .file_name()
-            .unwrap_or("unknown")
-            .to_string();
+        let raw_filename = field.file_name().unwrap_or("unknown").to_string();
 
         let safe_filename = std::path::Path::new(&raw_filename)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
-
+        println!("got request for binary: {}", safe_filename);
         let data = field
             .bytes()
             .await
@@ -91,33 +88,28 @@ pub async fn job_events(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
-    let rx = state
-        .tracker
-        .subscribe(&id)
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let stream = BroadcastStream::new(rx).filter_map(|result| async {
-        match result {
-            Ok(job_event) => {
-                let data = serde_json::to_string(&job_event).ok()?;
-                let event_name = match &job_event {
-                    JobEvent::StatusChanged(_) => "status",
-                    JobEvent::Error(_) => "error",
-                    JobEvent::Completed { .. } => "completed",
-                };
-                Some(Ok(Event::default().event(event_name).data(data)))
+    let rx = state.tracker.subscribe(&id).ok_or(StatusCode::NOT_FOUND)?;
+    let stream = futures::stream::unfold(rx, |mut rx| async {
+        loop {
+            match rx.recv().await {
+                Ok(job_event) => {
+                    let data = serde_json::to_string(&job_event).ok()?;
+                    let event_name = match &job_event {
+                        JobEvent::StatusChanged(_) => "status",
+                        JobEvent::Error(_) => "error",
+                        JobEvent::Completed { .. } => "completed",
+                    };
+                    return Some((Ok(Event::default().event(event_name).data(&data)), rx));
+                }
+                Err(broadcast::error::RecvError::Closed) => return None,
+                Err(_) => continue,
             }
-            Err(_) => None,
         }
     });
-
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-pub async fn cancel_job(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> StatusCode {
+pub async fn cancel_job(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
     if state.tracker.cancel(&id) {
         StatusCode::OK
     } else {

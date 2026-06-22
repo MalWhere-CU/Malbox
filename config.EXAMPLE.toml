@@ -2,18 +2,18 @@ listen_addr = "0.0.0.0:8080"
 [libvirt]
 uri = "qemu:///system"
 [paths]
-# Path to the nvram vars of the master
+
 master_nvram = "/home/mohamed/vm-images/master/master_vars.fd"
-# Path to the gold master qcow2 image (read-only)
+
 # master_image = "/home/mohamed/vm-images/alpine-gold.qcow2"
 master_image = "/home/mohamed/vm-images/master/testmaster.qcow2"
-# Directory for qcow2 overlays (per-job clones)
+
 overlay_dir = "/home/mohamed/vm-images/overlays/"
-# Directory for analysis reports
+
 report_dir = "/home/mohamed/vm-images/reports/"
-# Directory for created nvrams for each vm
+
 nvram_dir = "/home/mohamed/vm-images/nvrams/"
 [vm]
-# VM hardware (can be overridden per-job)
+
 vcpus = 2
 memory_mb = 4096

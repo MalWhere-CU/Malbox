@@ -24,7 +24,6 @@ impl SchemaRegistry {
             .get_array("args")?
             .iter()
             .map(|v| match v {
-                // args can be ["name", "type"] or just "name"
                 bson::Bson::Array(arr) => arr
                     .first()
                     .and_then(|v| v.as_str())

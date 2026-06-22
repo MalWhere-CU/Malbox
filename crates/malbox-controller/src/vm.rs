@@ -37,8 +37,6 @@ pub struct JobDomain {
     pub ip_addr: String,
 }
 
-// is this way ideal to keep track of states?
-// We are probably going to need this later when we can keep track of multiple jobs at the same time
 #[derive(Debug)]
 pub enum DomainState {
     NoState,
@@ -201,7 +199,6 @@ impl VmManager {
             if let Some(ip) = VmManager::get_ip_from_mac(network, mac) {
                 return Some(ip);
             }
-            // change this later to tokio
             std::thread::sleep(poll_interval);
         }
         None
@@ -253,7 +250,6 @@ impl VmManager {
             }
         };
         for net in networks {
-            //TODO: change this later when we create a special isolated network
             if net.get_name().expect("getting network name") == "default" {
                 network = Some(net);
             }
@@ -272,7 +268,6 @@ impl VmManager {
                 } else {
                     let _ = std::fs::remove_file(&overlay_path);
                     let _ = std::fs::remove_file(&nvram_path);
-                    //TODO: cleanup machine
                     return Err(anyhow::anyhow!("Obtaining ip address timed out."));
                 }
             }

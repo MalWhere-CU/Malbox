@@ -69,10 +69,10 @@ pub struct Job {
     pub status: JobStatus,
     pub sample_name: String,
     pub sample_path: PathBuf,
-    pub timeout_secs: u32,
+    pub timeout_secs: u32, // hard locked to 300s for now.
     pub created_at: u64,
     pub result: Option<AnalysisResult>,
-    pub tx: broadcast::Sender<JobEvent>,
+    pub tx: Option<broadcast::Sender<JobEvent>>,
 }
 
 pub struct JobTracker {
@@ -107,7 +107,7 @@ impl JobTracker {
             timeout_secs,
             created_at,
             result: None,
-            tx: tx.clone(),
+            tx: Some(tx.clone()),
         };
 
         self.jobs.write().unwrap().insert(id.clone(), job);
@@ -136,7 +136,8 @@ impl JobTracker {
     }
     pub fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<JobEvent>> {
         let jobs = self.jobs.read().unwrap();
-        jobs.get(id).map(|j| j.tx.subscribe())
+        jobs.get(id)
+            .and_then(|j| j.tx.as_ref().map(|tx| tx.subscribe()))
     }
     pub fn cancel(&self, id: &str) -> bool {
         self.jobs.write().unwrap().remove(id).is_some()
@@ -147,27 +148,34 @@ impl JobTracker {
     fn set_status(&self, id: &str, status: JobStatus) {
         let mut jobs = self.jobs.write().unwrap();
         if let Some(job) = jobs.get_mut(id) {
-            let _ = job.tx.send(JobEvent::StatusChanged(
-                format!("{:?}", status).to_lowercase(),
-            ));
+            if let Some(tx) = job.tx.as_ref() {
+                let _ = tx.send(JobEvent::StatusChanged(
+                    format!("{:?}", status).to_lowercase(),
+                ));
+            }
             job.status = status;
         }
     }
     fn set_result(&self, id: &str, result: AnalysisResult) {
         let mut jobs = self.jobs.write().unwrap();
         if let Some(job) = jobs.get_mut(id) {
-            let _ = job.tx.send(JobEvent::Completed {
-                exit_code: result.exit_code,
-                runtime_ms: result.runtime_ms,
-            });
+            if let Some(tx) = job.tx.take() {
+                let _ = tx.send(JobEvent::Completed {
+                    exit_code: result.exit_code,
+                    runtime_ms: result.runtime_ms,
+                });
+            }
             job.result = Some(result);
             job.status = JobStatus::Completed;
         }
     }
+
     fn emit_error(&self, id: &str, msg: String) {
-        let jobs = self.jobs.read().unwrap();
-        if let Some(job) = jobs.get(id) {
-            let _ = job.tx.send(JobEvent::Error(msg));
+        let mut jobs = self.jobs.write().unwrap();
+        if let Some(job) = jobs.get_mut(id) {
+            if let Some(tx) = job.tx.take() {
+                let _ = tx.send(JobEvent::Error(msg));
+            }
         }
     }
 }
@@ -206,8 +214,8 @@ async fn run_job(
         Err(e) => {
             let msg = e.to_string();
             eprintln!("[job {}] failed: {}", job_id, msg);
-            tracker.emit_error(&job_id, msg);
             tracker.set_status(&job_id, JobStatus::Failed);
+            tracker.emit_error(&job_id, msg);
         }
     }
 }
@@ -313,7 +321,7 @@ async fn connect_mtls(
         ))
         .ca_certificate(Certificate::from_pem(controller_certs.root_ca_cert.pem()));
     let agent_url = format!("https://{}:50055", agent_ip);
-    println!("awaiting connection? pray it works!");
+    println!("awaiting connection...");
     let channel = loop {
         match tonic::transport::Channel::from_shared(agent_url.clone())?
             .tls_config(client_tls.clone())?
@@ -324,7 +332,7 @@ async fn connect_mtls(
             Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
         }
     };
-    println!("It worked!!");
+    println!("Connected!!");
     let mut client = AgentClient::new(channel);
     let resp = client
         .hello_svc(Request::new(Hello {
