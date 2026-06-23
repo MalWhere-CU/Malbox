@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Malbox</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: monospace; background: #0a0a0a; color: #c0c0c0; padding: 2rem; }
+  h1 { color: #00ff41; margin-bottom: 1.5rem; font-size: 1.4rem; }
+  .row { display: flex; gap: 1.5rem; align-items: flex-start; }
+  .panel { background: #111; border: 1px solid #222; padding: 1rem; flex: 1; min-width: 0; }
+  .panel h2 { font-size: 0.85rem; color: #666; text-transform: uppercase; margin-bottom: 0.75rem; letter-spacing: 0.1em; }
+  label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 0.3rem; }
+  input[type="file"] { font-family: monospace; font-size: 0.8rem; color: #aaa; }
+  button { font-family: monospace; font-size: 0.85rem; background: #00ff41; color: #000; border: none; padding: 0.5rem 1.2rem; cursor: pointer; margin-top: 0.8rem; font-weight: bold; }
+  button:disabled { background: #333; color: #666; cursor: not-allowed; }
+  #status { font-size: 1.1rem; margin: 0.5rem 0; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.queued    { background: #555; }
+  .dot.running   { background: #f0ad4e; }
+  .dot.completed { background: #00ff41; }
+  .dot.failed    { background: #ff3333; }
+  #log { height: 70vh; overflow-y: auto; font-size: 0.78rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+  .log-entry { border-bottom: 1px solid #1a1a1a; padding: 2px 0; }
+  .log-entry .ts { color: #555; }
+  .log-entry .evt-status  { color: #f0ad4e; }
+  .log-entry .evt-completed { color: #00ff41; }
+  .log-entry .evt-error   { color: #ff3333; }
+  .log-entry .evt-raw     { color: #666; }
+  .result-box { background: #0d0d0d; border: 1px solid #1a1a1a; padding: 0.75rem; margin-top: 0.75rem; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; display: none; }
+</style>
+</head>
+<body>
+
+<h1>malbox</h1>
+
+<div class="row">
+  <div class="panel" style="max-width:360px;">
+    <h2>Upload</h2>
+    <label>Sample (.exe)</label>
+    <input type="file" id="file" accept=".exe,.dll,.bin">
+    <br>
+    <button id="btn" onclick="upload()">Submit</button>
+    <div id="status"></div>
+    <div id="result" class="result-box"></div>
+  </div>
+
+  <div class="panel" style="flex:2;">
+    <h2>Events</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const API = location.origin;
+let currentJobId = null;
+let evtSource = null;
+
+function ts() {
+  return new Date().toISOString().slice(11, 23);
+}
+
+function log(cls, text) {
+  const d = document.getElementById('log');
+  const e = document.createElement('div');
+  e.className = 'log-entry';
+  e.innerHTML = `<span class="ts">[${ts()}]</span> <span class="${cls}">${text}</span>`;
+  d.appendChild(e);
+  d.scrollTop = d.scrollHeight;
+}
+
+function setStatus(state, text) {
+  document.getElementById('status').innerHTML =
+    `<span class="dot ${state}"></span>${text}`;
+}
+
+async function upload() {
+  const fileInput = document.getElementById('file');
+  if (!fileInput.files.length) { alert('Select a file'); return; }
+
+  const btn = document.getElementById('btn');
+  btn.disabled = true;
+
+  const form = new FormData();
+  form.append('file', fileInput.files[0]);
+
+  try {
+    log('evt-raw', `POST ${API}/jobs — uploading ${fileInput.files[0].name}...`);
+    const res = await fetch(`${API}/jobs`, { method: 'POST', body: form });
+    const body = await res.json();
+
+    if (!res.ok) {
+      log('evt-error', `Upload failed: ${res.status} ${body}`);
+      btn.disabled = false;
+      return;
+    }
+
+    currentJobId = body.job_id;
+    log('evt-status', `Job created: ${currentJobId}`);
+    setStatus('queued', 'queued');
+    listen(currentJobId);
+
+  } catch (e) {
+    log('evt-error', `Network error: ${e.message}`);
+  }
+  btn.disabled = false;
+}
+
+function listen(jobId) {
+  if (evtSource) evtSource.close();
+
+  const url = `${API}/jobs/${jobId}/events`;
+  log('evt-raw', `SSE connecting → ${url}`);
+  evtSource = new EventSource(url);
+
+  evtSource.addEventListener('status', (e) => {
+    const data = JSON.parse(e.data);
+    log('evt-status', `status → ${data.data}`);
+
+    const s = data.data;
+    if (s === 'completed' || s === 'failed' || s === 'analyzing' || s === 'spawning_vm' || s === 'bootstrapping' || s === 'uploading') {
+      const cls = (s === 'completed') ? 'completed' : (s === 'failed') ? 'failed' : 'running';
+      setStatus(cls, s);
+    }
+  });
+
+  evtSource.addEventListener('completed', (e) => {
+    const data = JSON.parse(e.data);
+    log('evt-completed', `completed → exit_code=${data.data.exit_code} runtime=${data.data.runtime_ms}ms`);
+    setStatus('completed', 'completed');
+    fetchResult(jobId);
+    evtSource.close();
+  });
+
+  evtSource.addEventListener('analysis_error', (e) => {
+    const data = JSON.parse(e.data);
+    log('evt-error', `error → ${data.data}`);
+    setStatus('failed', 'failed');
+    evtSource.close();
+  });
+
+  evtSource.onerror = () => {
+    if (evtSource && evtSource.readyState === EventSource.CLOSED) {
+      log('evt-raw', 'SSE connection closed');
+    }
+  };
+}
+
+async function fetchResult(jobId) {
+  try {
+    const res = await fetch(`${API}/jobs/${jobId}`);
+    const job = await res.json();
+    if (job.result) {
+      const box = document.getElementById('result');
+      box.style.display = 'block';
+      box.textContent = job.result.features_json;
+      log('evt-raw', `features_json received (${job.result.features_json.length} bytes)`);
+    }
+  } catch (e) {
+    log('evt-error', `fetch result: ${e.message}`);
+  }
+}
+</script>
+</body>
+</html>
